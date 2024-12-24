@@ -1,13 +1,23 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <signal.h>
 #include <string.h>
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <pthread.h>
 
+// This one has to be global so we can close it in the signal handler
+int server_socket;
 #define PORT 4040
 #define BUFFER_SIZE 1024
 #define SAMPLE_RESPONSE "Hello world!\r\n"
+
+void sigint_handler(int sig) {
+    (void)sig; // suppress warning
+    puts("Recieved SIGNINT. Sutting down...");
+    close(server_socket);
+    exit(1);
+}
 
 
 void *handle_client(void *client_socket_ptr) {
@@ -15,21 +25,34 @@ void *handle_client(void *client_socket_ptr) {
 
     free(client_socket_ptr);
 
-    send(client_socket, SAMPLE_RESPONSE, strlen(SAMPLE_RESPONSE), 0);
-    printf("Sent response to client\n");
+    // Read http message from socket line by line
+    char buffer[BUFFER_SIZE];
+    int bytes_read;
+    while ((bytes_read = recv(client_socket, buffer, BUFFER_SIZE, 0)) > 0) {
+        // print the message
+        printf("%s", buffer);
+        #ifdef DEBUG
+        printf("bytes recieved");
+        #endif
 
+    }
+
+    #ifdef DEBUG
+    printf("Connection closed\n");
+    #endif
+
+
+    // send a sample response
+    send(client_socket, SAMPLE_RESPONSE, strlen(SAMPLE_RESPONSE), 0);
 
     close(client_socket);
-    printf("Closed connection to client\n");
 
     return NULL;
 }
 
 
-
 int main() {
     int new_socket;
-    int server_socket;
 
     // define server address
     struct sockaddr_in server_address;
@@ -58,10 +81,15 @@ int main() {
         exit(1);
     }
 
+    // register signal handler for SIGINT
+    signal(SIGINT, sigint_handler);
+
+
     // accept incoming connections
     while (1) {
         new_socket = accept(server_socket, (struct sockaddr *)&server_address, (socklen_t *)&address_len);
         if (new_socket == -1) {
+            close(server_socket);
             perror("Error accepting incoming connection");
             exit(1);
         }
@@ -73,6 +101,7 @@ int main() {
         // create a new thread to handle the client
         if (pthread_create(&thread, NULL, handle_client, client_socket_ptr) != 0) {
             perror("Error creating thread");
+            close(server_socket);
             free(client_socket_ptr);
             exit(1);
         }
@@ -82,5 +111,4 @@ int main() {
 
     close(server_socket);
     return 0;
-
 }
