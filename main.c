@@ -25,17 +25,44 @@ void *handle_client(void *client_socket_ptr) {
 
     free(client_socket_ptr);
 
-    // Read http message from socket line by line
-    char buffer[BUFFER_SIZE];
-    int bytes_read;
-    while ((bytes_read = recv(client_socket, buffer, BUFFER_SIZE, 0)) > 0) {
-        // print the message
-        printf("%s", buffer);
-        #ifdef DEBUG
-        printf("bytes recieved");
-        #endif
 
+
+    int bytes_read;
+    char line[BUFFER_SIZE+1];
+    char buffer[BUFFER_SIZE+1];
+    signal(SIGINT, sigint_handler);
+
+    // change the above loop to read line by line
+    while (1) {
+        bytes_read = recv(client_socket, line, BUFFER_SIZE, 0);
+
+        if (bytes_read == 0) {
+            puts("Connection closed by peer\n");
+            break;
+        }
+        if (bytes_read < 0) {
+            perror("Error reading from socket");
+            break;
+        }
+
+        buffer[bytes_read] = '\0';
+        printf("rec1: %s\n", buffer);
+        char *new_line_pos = strchr(line, '\n');
+
+        if (new_line_pos) {
+            size_t bytes_to_copy = new_line_pos - buffer+1;
+            // BUFFER OVERFLOW: I think in the edge case of there being
+            // multiple buffers without a newline this could overflow the
+            // line buffer. It will need to be confirmed and fixed.
+            strncat(line, buffer, bytes_to_copy);
+            printf("-> %s", line);
+            break;
+        } else {
+            // if ther is no newline in the buffer, just append the buffer to the line
+            strncat(line, buffer, bytes_read);
+        }
     }
+
 
     #ifdef DEBUG
     printf("Connection closed\n");
