@@ -25,16 +25,20 @@ void *handle_client(void *client_socket_ptr) {
 
     free(client_socket_ptr);
 
-
-
     int bytes_read;
+    char *new_line_pos;
     char line[BUFFER_SIZE+1];
     char buffer[BUFFER_SIZE+1];
+    memset(line, 0, sizeof(line));
+    memset(buffer, 0, sizeof(buffer));
     signal(SIGINT, sigint_handler);
+    
 
-    // change the above loop to read line by line
+
+
+    // Read the request in chunks incase its larger than our buffer size
     while (1) {
-        bytes_read = recv(client_socket, line, BUFFER_SIZE, 0);
+        bytes_read = recv(client_socket, buffer, BUFFER_SIZE, 0);
 
         if (bytes_read == 0) {
             puts("Connection closed by peer\n");
@@ -44,23 +48,34 @@ void *handle_client(void *client_socket_ptr) {
             perror("Error reading from socket");
             break;
         }
-
+        
         buffer[bytes_read] = '\0';
-        printf("rec1: %s\n", buffer);
-        char *new_line_pos = strchr(line, '\n');
+        
 
-        if (new_line_pos) {
+        // separate each line of the buffer
+        while ((new_line_pos = strchr(buffer, '\n')) != NULL) {
             size_t bytes_to_copy = new_line_pos - buffer+1;
-            // BUFFER OVERFLOW: I think in the edge case of there being
-            // multiple buffers without a newline this could overflow the
-            // line buffer. It will need to be confirmed and fixed.
+
             strncat(line, buffer, bytes_to_copy);
+            
+
+            // Process each line
             printf("-> %s", line);
-            break;
-        } else {
-            // if ther is no newline in the buffer, just append the buffer to the line
-            strncat(line, buffer, bytes_read);
-        }
+            memset(line, 0, sizeof(line));
+
+            // Ensure the pointer is not past the end of the buffer
+            if (buffer+ bytes_to_copy <= buffer + BUFFER_SIZE) {
+                memmove(buffer, buffer+bytes_to_copy, BUFFER_SIZE-bytes_to_copy);
+            }
+
+        } 
+        
+        // if ther is no newline in the buffer, just append the buffer to the line
+        // this line should be continued in the next buffer hopefully
+        // BUFFER OVERFLOW: We dont actually check how many times things are being copied to
+        // line. If the client sends a very long line, it overflows the line buffer.
+        strncat(line, buffer, bytes_read);
+            
     }
 
 
@@ -84,10 +99,18 @@ int main() {
     // define server address
     struct sockaddr_in server_address;
     int address_len = sizeof(server_address);
+    int optval = 1;
 
     // create server socket
     if ((server_socket = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
         perror("Error creating socket");
+        exit(1);
+    }
+    
+    // Set SO_REUSEADDR option to allow binding to an address that is already in use
+    if (setsockopt(server_socket, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval)) < 0) {
+        perror("Error setting SO_REUSEADDR");
+        close(server_socket);
         exit(1);
     }
 
@@ -99,12 +122,14 @@ int main() {
 
     if (bind(server_socket, (struct sockaddr *)&server_address, sizeof(server_address)) == -1) {
         perror("Error binding socket to address");
+        close(server_socket);
         exit(1);
     }
 
     // listen for incoming connections
     if (listen(server_socket, 5) == -1) {
         perror("Error listening for incoming connections");
+        close(server_socket);
         exit(1);
     }
 
